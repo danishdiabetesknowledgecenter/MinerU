@@ -7,7 +7,8 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
     MINERU_MODEL_SMALL_BACKEND=onnx \
     MINERU_MODEL_ONNX_DEVICE=cpu \
-    MINERU_TELEMETRY_DISABLED=1
+    MINERU_TELEMETRY_DISABLED=1 \
+    MINERU_HOME=/opt/mineru
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 curl \
@@ -17,8 +18,10 @@ RUN apt-get update \
 RUN pip install "mineru==4.2.3"
 
 # Bake the basic-tier ONNX models (~860 MB) into the image so the first upload doesn't download them.
+# MINERU_HOME is outside /root because Opsily may run the container as a non-root user.
 RUN mineru-kit models download --tier basic --small-backend onnx --source huggingface \
- && mineru-kit models verify --tier basic --small-backend onnx
+ && mineru-kit models verify --tier basic --small-backend onnx \
+ && chmod -R a+rwX /opt/mineru
 
 # Runtime: never download; trust Opsily's proxy headers so upload/result URLs come back as https://;
 # keep uploads/results 1 hour instead of 24 h (ephemeral disk); trim heap after jobs.
@@ -28,10 +31,10 @@ ENV MINERU_MODEL_SOURCE=local \
     MINERU_MALLOC_TRIM=1
 
 # 4.2.3 bug: --upload-dir defaults to "" and click rejects it as "not writable", so pass a real directory.
-RUN mkdir -p /tmp/mineru-uploads
+RUN mkdir -p /tmp/mineru-uploads && chmod 1777 /tmp/mineru-uploads
 
 EXPOSE 8000
 
 # Opsily chooses the port and passes it in $PORT. MINERU_API_KEY (set as a secret in the Opsily dashboard)
 # becomes the required Bearer token; without it the API is open.
-CMD ["sh", "-c", "echo \"Listening on port ${PORT:-8000}\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --upload-dir /tmp/mineru-uploads --tier basic --concurrency 1 --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
+CMD ["sh", "-c", "echo \"Running as $(id); listening on port ${PORT:-8000}\"; [ -w \"$HOME\" ] || export HOME=/tmp; UP=/tmp/mineru-uploads; [ -w \"$UP\" ] || UP=$(mktemp -d); echo \"Upload dir: $UP\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --upload-dir \"$UP\" --tier basic --concurrency 1 --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
