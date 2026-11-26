@@ -27,8 +27,11 @@ ENV MINERU_MODEL_SOURCE=local \
     MINERU_API_RETENTION_SECONDS=3600 \
     MINERU_MALLOC_TRIM=1
 
+# 4.2.3 bug: --upload-dir defaults to "" and click rejects it as "not writable", so pass a real directory.
+RUN mkdir -p /tmp/mineru-uploads
+
 EXPOSE 8000
 
 # Opsily chooses the port and passes it in $PORT. MINERU_API_KEY (set as a secret in the Opsily dashboard)
 # becomes the required Bearer token; without it the API is open.
-CMD ["sh", "-c", "echo \"Listening on port ${PORT:-8000}\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --tier basic --concurrency 1 --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
+CMD ["sh", "-c", "echo \"Listening on port ${PORT:-8000}\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --upload-dir /tmp/mineru-uploads --tier basic --concurrency 1 --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
