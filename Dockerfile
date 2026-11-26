@@ -24,11 +24,13 @@ RUN mineru-kit models download --tier basic --small-backend onnx --source huggin
  && chmod -R a+rwX /opt/mineru
 
 # Runtime: never download; trust Opsily's proxy headers so upload/result URLs come back as https://;
-# keep uploads/results 1 hour instead of 24 h (ephemeral disk); trim heap after jobs.
+# keep uploads/results 1 hour instead of 24 h (ephemeral disk); trim heap after jobs;
+# process 8 pages at a time instead of 64 (36 pages at once got the container OOM-killed).
 ENV MINERU_MODEL_SOURCE=local \
     FORWARDED_ALLOW_IPS=* \
     MINERU_API_RETENTION_SECONDS=3600 \
-    MINERU_MALLOC_TRIM=1
+    MINERU_MALLOC_TRIM=1 \
+    MINERU_PROCESSING_WINDOW_SIZE=8
 
 # 4.2.3 bug: --upload-dir defaults to "" and click rejects it as "not writable", so pass a real directory.
 RUN mkdir -p /tmp/mineru-uploads && chmod 1777 /tmp/mineru-uploads
