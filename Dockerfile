@@ -24,19 +24,30 @@ RUN mineru-kit models download --tier basic --small-backend onnx --source huggin
  && chmod -R a+rwX /opt/mineru
 
 # Runtime: never download; trust Opsily's proxy headers so upload/result URLs come back as https://;
-# keep uploads/results 1 hour instead of 24 h (ephemeral disk); trim heap after jobs;
-# process 8 pages at a time instead of 64 (36 pages at once got the container OOM-killed).
+# keep uploads/results 1 hour instead of 24 h (ephemeral disk).
 ENV MINERU_MODEL_SOURCE=local \
     FORWARDED_ALLOW_IPS=* \
-    MINERU_API_RETENTION_SECONDS=3600 \
-    MINERU_MALLOC_TRIM=1 \
-    MINERU_PROCESSING_WINDOW_SIZE=8
+    MINERU_API_RETENTION_SECONDS=3600
+
+# Conservative memory settings (36 pages at once got the container OOM-killed):
+# - 4 pages per processing window instead of 64
+# - 2 CPU threads for ONNX/OpenMP (fewer threads = fewer per-thread buffers; the box has ~2 cores)
+# - limit glibc malloc arenas and trim the heap after jobs so freed memory goes back to the OS
+ENV MINERU_PROCESSING_WINDOW_SIZE=4 \
+    MINERU_INTRA_OP_NUM_THREADS=2 \
+    MINERU_INTER_OP_NUM_THREADS=1 \
+    MINERU_CPU_NUM_THREADS=2 \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    MALLOC_ARENA_MAX=2 \
+    MINERU_MALLOC_TRIM=1
 
 # 4.2.3 bug: --upload-dir defaults to "" and click rejects it as "not writable", so pass a real directory.
 RUN mkdir -p /tmp/mineru-uploads && chmod 1777 /tmp/mineru-uploads
 
 EXPOSE 8000
 
+# One document at a time, give up after 20 min per file, no image analysis.
 # Opsily chooses the port and passes it in $PORT. MINERU_API_KEY (set as a secret in the Opsily dashboard)
 # becomes the required Bearer token; without it the API is open.
-CMD ["sh", "-c", "echo \"Running as $(id); listening on port ${PORT:-8000}\"; [ -w \"$HOME\" ] || export HOME=/tmp; UP=/tmp/mineru-uploads; [ -w \"$UP\" ] || UP=$(mktemp -d); echo \"Upload dir: $UP\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --upload-dir \"$UP\" --tier basic --concurrency 1 --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
+CMD ["sh", "-c", "echo \"Running as $(id); listening on port ${PORT:-8000}\"; [ -w \"$HOME\" ] || export HOME=/tmp; UP=/tmp/mineru-uploads; [ -w \"$UP\" ] || UP=$(mktemp -d); echo \"Upload dir: $UP\"; [ -n \"$MINERU_API_KEY\" ] && echo 'API key enabled' || echo 'WARNING: no MINERU_API_KEY, API is open'; exec mineru-kit api-server --host 0.0.0.0 --port \"${PORT:-8000}\" --upload-dir \"$UP\" --tier basic --concurrency 1 --task-timeout 1200 --disable-image-analysis --preload-models ${MINERU_API_KEY:+--api-key \"$MINERU_API_KEY\"}"]
